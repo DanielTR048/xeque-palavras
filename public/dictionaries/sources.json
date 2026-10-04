@@ -1,0 +1,72 @@
+{
+  "pt": {
+    "name": "fserb/pt-br — léxico de português",
+    "repository": "https://github.com/fserb/pt-br",
+    "revision": "93ba2a6f3b2f85262fba72df09d448c6bb2fa50a",
+    "file": "lexico",
+    "sha256": "1148de44d58d59e40ef0a6695acefc031acf3f3e6bbfbfcc4c18d85660bde7c1",
+    "license": "MIT",
+    "licenseFile": "LICENSE",
+    "licenseSha256": "667532c0584a1c67ac75b83c13241d9286c9704d07e608d7e84bdaa9b3096d9c",
+    "url": "https://raw.githubusercontent.com/fserb/pt-br/93ba2a6f3b2f85262fba72df09d448c6bb2fa50a/lexico",
+    "licenseUrl": "https://raw.githubusercontent.com/fserb/pt-br/93ba2a6f3b2f85262fba72df09d448c6bb2fa50a/LICENSE",
+    "retrievedOn": "2026-10-03",
+    "normalizedCount": 56887,
+    "byLength": {
+      "4": 2382,
+      "5": 6047,
+      "6": 10985,
+      "7": 16674,
+      "8": 20799
+    },
+    "curatedCount": 756,
+    "curatedByLength": {
+      "4": 140,
+      "5": 224,
+      "6": 150,
+      "7": 128,
+      "8": 114
+    },
+    "curatedSupplements": [
+      "campeoes",
+      "luzes",
+      "ovos",
+      "paes",
+      "tesouras"
+    ],
+    "outputSha256": "942ec6988ad7e71bd1be3a14765b2f24d0631843d9840cda5b3fc6900240bbee"
+  },
+  "en": {
+    "name": "English Speller Database / SCOWL — American English, size 60",
+    "repository": "https://github.com/en-wl/wordlist-diff",
+    "revision": "7f2f4078354752045ee16a041605686561122185",
+    "file": "en_US.txt",
+    "sha256": "45a4dd29b86234fbabce26f33272466bb5572db6fdca1470c4f218e6b666a56d",
+    "license": "SCOWL permissive license (MIT-like)",
+    "licenseFile": "Copyright",
+    "licenseSha256": "71bffd4b74ad47fff01c8b3c666e77da92737854e568850d8728024e0a53f304",
+    "url": "https://raw.githubusercontent.com/en-wl/wordlist-diff/7f2f4078354752045ee16a041605686561122185/en_US.txt",
+    "licenseUrl": "https://raw.githubusercontent.com/en-wl/wordlist-diff/7f2f4078354752045ee16a041605686561122185/Copyright",
+    "retrievedOn": "2026-10-03",
+    "normalizedCount": 40762,
+    "byLength": {
+      "4": 2744,
+      "5": 5198,
+      "6": 8393,
+      "7": 11677,
+      "8": 12750
+    },
+    "curatedCount": 2405,
+    "curatedByLength": {
+      "4": 461,
+      "5": 569,
+      "6": 498,
+      "7": 419,
+      "8": 458
+    },
+    "curatedSupplements": [
+      "defence"
+    ],
+    "outputSha256": "a7fdeeaab121c17195163bf243303e01a1ac1b21f9111e85fd9b80a7a8f67217"
+  }
+}

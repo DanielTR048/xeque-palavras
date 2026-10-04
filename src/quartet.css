@@ -1,0 +1,439 @@
+/* The quartet owns the full play area; other game modes keep their layout. */
+.game-layout.quartet-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.quartet-layout > .play-card,
+.quartet-layout > .right-panel {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.quartet-layout .quartet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 0 24px 5px;
+  padding: 7px 0 10px;
+}
+
+.quartet-layout .quartet-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #667958;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quartet-layout .quartet-progress strong {
+  color: var(--green);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.quartet-layout .quartet-board-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quartet-layout .quartet-board-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 36px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #dfe6d6;
+  border-radius: 6px;
+  background: #f4f7ed;
+  color: #788a68;
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.quartet-layout .quartet-board-tabs button:hover {
+  border-color: #a6bb93;
+  background: #e9f0df;
+  color: var(--green);
+}
+
+.quartet-layout .quartet-board-tabs button.is-solved {
+  border-color: #bdd0b4;
+  background: #e3eedc;
+  color: #456c3e;
+}
+
+.quartet-layout .quartet-board-tabs button.active {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+  box-shadow: 0 2px 5px #173e3214;
+}
+
+.quartet-layout .quartet-board-tabs button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.quartet-layout .quartet-scroll-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 auto;
+  color: #819071;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* The scroll container contains all horizontal overflow, including long words. */
+.quartet-layout .boards-viewport {
+  container-type: inline-size;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: #9fb48c #edf1e6;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quartet-layout .boards-viewport:focus-visible {
+  outline: 2px solid #a88a45;
+  outline-offset: -3px;
+  border-radius: 5px;
+}
+
+.quartet-layout .boards-viewport::-webkit-scrollbar {
+  height: 8px;
+}
+
+.quartet-layout .boards-viewport::-webkit-scrollbar-track {
+  border-radius: 8px;
+  background: #edf1e6;
+  margin-inline: 24px;
+}
+
+.quartet-layout .boards-viewport::-webkit-scrollbar-thumb {
+  border: 2px solid #edf1e6;
+  border-radius: 8px;
+  background: #9fb48c;
+}
+
+.quartet-layout .boards-viewport::-webkit-scrollbar-thumb:hover {
+  background: #738f60;
+}
+
+.quartet-layout .boards.boards-4 {
+  /* Four 24px minimum tiles plus 4px gaps, board padding and outer spacing. */
+  --quartet-min-board: calc(var(--word-length) * 28px + 26px);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: auto;
+  grid-auto-flow: column;
+  align-items: start;
+  justify-content: start;
+  gap: 18px;
+  width: max(100%, calc(var(--quartet-min-board) * 4 + 102px));
+  min-width: 100%;
+  max-width: none;
+  padding: 8px 24px 18px;
+}
+
+.quartet-layout .boards-4 .board-wrapper {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding: 11px 9px 11px 19px;
+  border: 1px solid #e3e9da;
+  border-radius: 9px;
+  background: #fafcf5;
+  scroll-snap-align: start;
+  scroll-margin-inline: 0;
+}
+
+.quartet-layout .boards-4 .board-wrapper.selected {
+  border-color: #a5ba8f;
+  background: #f0f5e8;
+  box-shadow: 0 0 0 2px #bdcda326, 0 5px 12px #2e4d2510;
+}
+
+.quartet-layout .boards-4 .board-wrapper.solved {
+  border-color: #c0d1b6;
+  background: #f1f7eb;
+}
+
+.quartet-layout .boards-4 .board-wrapper.solved.selected {
+  border-color: #7da56b;
+}
+
+.quartet-layout .boards-4 .board-select {
+  min-height: 28px;
+  padding: 0 0 10px;
+  color: #768967;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1px;
+}
+
+.quartet-layout .boards-4 .selected .board-select {
+  color: var(--green);
+}
+
+.quartet-layout .boards-4 .board-indicator {
+  width: 6px;
+  height: 6px;
+  box-shadow: 0 0 0 3px #dbe5cd66;
+}
+
+.quartet-layout .boards-4 .board-files {
+  padding-bottom: 7px;
+  color: #8a997b;
+  font-size: 10px;
+}
+
+.quartet-layout .boards-4 .word-board,
+.quartet-layout .boards-4 .board-row {
+  gap: 4px;
+}
+
+.quartet-layout .boards-4 .board-row {
+  grid-template-columns: repeat(var(--word-length), minmax(0, 1fr));
+}
+
+.quartet-layout .boards-4 .row-number {
+  left: -15px;
+  color: #8c9a7d;
+  font-size: 9px;
+}
+
+.quartet-layout .boards-4 .tile {
+  border-radius: 4px;
+  font-size: clamp(17px, 2vw, 23px);
+}
+
+.quartet-layout .boards-4 .tile.cursor::after {
+  bottom: 5px;
+  height: 2px;
+}
+
+.quartet-layout .board-message {
+  min-height: 43px;
+  padding-top: 12px;
+}
+
+.quartet-layout .keyboard {
+  width: 100%;
+  max-width: 568px;
+  padding-bottom: 23px;
+}
+
+/* Settings move below the four boards, leaving the entire row for play. */
+.quartet-layout > .right-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 18px;
+}
+
+.quartet-layout .right-panel > .settings-card {
+  grid-row: auto;
+  min-width: 0;
+}
+
+.quartet-layout .right-panel > .tip-card {
+  min-width: 0;
+  min-height: 0;
+}
+
+.quartet-layout .right-panel > .daily-card {
+  min-width: 0;
+  align-items: center;
+}
+
+.quartet-layout .right-panel > .dictionary-note {
+  grid-column: 1 / -1;
+  padding-top: 0;
+}
+
+.quartet-layout .tip-card h3 {
+  max-width: 230px;
+}
+
+.quartet-layout .tip-card p {
+  max-width: 230px;
+}
+
+.high-contrast .quartet-layout .boards-4 .board-wrapper.selected {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green);
+}
+
+@media (max-width: 1000px) {
+  .quartet-layout > .right-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+  }
+
+  .quartet-layout .right-panel > .settings-card {
+    grid-row: span 2;
+  }
+
+  .quartet-layout .right-panel > .tip-card {
+    min-height: 170px;
+  }
+
+  .quartet-layout .quartet-scroll-hint {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .game-layout.quartet-layout {
+    gap: 17px;
+  }
+
+  .quartet-layout .quartet-toolbar {
+    gap: 8px 10px;
+    margin: 0 16px 2px;
+    padding-top: 4px;
+  }
+
+  .quartet-layout .quartet-progress {
+    margin-right: auto;
+    font-size: 10px;
+  }
+
+  .quartet-layout .quartet-progress strong {
+    font-size: 14px;
+  }
+
+  .quartet-layout .quartet-board-tabs {
+    gap: 5px;
+  }
+
+  .quartet-layout .quartet-board-tabs button {
+    min-width: 32px;
+    min-height: 34px;
+    padding-inline: 8px;
+  }
+
+  .quartet-layout .quartet-scroll-hint {
+    font-size: 9px;
+  }
+
+  .quartet-layout .boards-viewport {
+    scroll-padding-inline: 16px;
+    scrollbar-width: auto;
+  }
+
+  .quartet-layout .boards-viewport::-webkit-scrollbar {
+    height: 9px;
+  }
+
+  .quartet-layout .boards-viewport::-webkit-scrollbar-track {
+    margin-inline: 16px;
+  }
+
+  .quartet-layout .boards.boards-4 {
+    /* Keep one readable board and a peek at the next; never wrap into 2x2. */
+    --quartet-mobile-board: max(
+      var(--quartet-min-board),
+      min(calc(var(--word-length) * 47px + 26px), calc(100cqw - 68px))
+    );
+    grid-template-columns: repeat(4, var(--quartet-mobile-board));
+    gap: 14px;
+    width: max-content;
+    min-width: 100%;
+    padding: 7px 16px 16px;
+  }
+
+  .quartet-layout .boards-4 .board-wrapper {
+    padding-top: 10px;
+  }
+
+  .quartet-layout .boards-4 .board-select {
+    font-size: 9px;
+  }
+
+  .quartet-layout .boards-4 .tile {
+    font-size: clamp(18px, 5.4vw, 23px);
+  }
+
+  .quartet-layout .boards-4 .state-symbol {
+    right: 2px;
+    bottom: 2px;
+    font-size: 8px;
+  }
+
+  .quartet-layout .keyboard {
+    padding-bottom: 19px;
+  }
+}
+
+@media (max-width: 480px) {
+  .quartet-layout > .right-panel {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .quartet-layout .right-panel > .settings-card {
+    grid-row: auto;
+    padding: 20px;
+  }
+
+  .quartet-layout .right-panel > .tip-card,
+  .quartet-layout .right-panel > .daily-card {
+    min-height: 0;
+    padding: 20px;
+  }
+
+  .quartet-layout .right-panel .panel-description {
+    margin-bottom: 17px;
+  }
+
+  .quartet-layout .right-panel .field-hint {
+    min-height: 0;
+    margin-bottom: 17px;
+    font-size: 9px;
+  }
+
+  .quartet-layout .right-panel .settings-summary {
+    flex-direction: row;
+    font-size: 9px;
+  }
+
+  .quartet-layout .right-panel .length-selector button {
+    height: 35px;
+    font-size: 11px;
+  }
+
+  .quartet-layout .right-panel .tip-card h3 {
+    max-width: 250px;
+  }
+
+  .quartet-layout .right-panel .tip-card p {
+    max-width: 250px;
+    font-size: 10px;
+  }
+
+  .quartet-layout .right-panel .daily-card-icon {
+    display: grid;
+  }
+}
