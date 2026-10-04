@@ -1,4 +1,6 @@
 import { getMaxAttempts, type GameConfig, type GameState, type Language } from './engine';
+import { canonicalGameId, documentHistory, documentStats, emptyDocument, latestGame, mergeDocuments, parseDocument, type SyncDocument } from '../sync/model';
+import type { ProfileId } from '../profiles/profiles';
 
 export interface Preferences { highContrast: boolean; sound: boolean }
 export interface GameStats {
@@ -297,4 +299,136 @@ export function getStats(language?: Language): GameStats {
 
 export function getHistory(language?: Language): GameState[] {
   return readResults().history.filter(game => !language || game.config.language === language).slice(0, 50);
+}
+
+export type ProfileStorage = ReturnType<typeof createProfileStorage>;
+export const profileStorageKey = (profile: ProfileId) => `xeque-palavras:v2:profile:${profile}`;
+
+/** The profile is captured by each method, including delayed writes after a profile switch. */
+export function createProfileStorage(profile: ProfileId) {
+  const key = profileStorageKey(profile);
+  const listeners = new Set<(source: 'local' | 'remote') => void>();
+  let document = emptyDocument();
+  let revision = 0;
+  let raw: string | null = null;
+  try { raw = globalThis.localStorage?.getItem(key) ?? null; if (raw) document = parseDocument(JSON.parse(raw)); }
+  catch {
+    // Preserve an unreadable document before a subsequent move writes a recoverable new one.
+    if (raw) {
+      try { globalThis.localStorage?.setItem(`${key}:recovery:${Date.now()}`, raw); }
+      catch { /* The original remains untouched until a new write can succeed. */ }
+    }
+  }
+
+  const persist = () => {
+    try { globalThis.localStorage?.setItem(key, JSON.stringify(document)); }
+    catch { /* Keep the complete document in memory for this session. */ }
+  };
+
+  // The v1 keys remain untouched as a backup. Only Daniel inherits this device's old data.
+  if (!raw && profile === 'daniel') {
+    const migrationKey = 'xeque-palavras:v2:legacy-origin';
+    let origin = '';
+    const originals: Record<string, string> = {};
+    try {
+      origin = globalThis.localStorage?.getItem(migrationKey) ?? '';
+      for (let index = 0; index < (globalThis.localStorage?.length ?? 0); index++) {
+        const oldKey = globalThis.localStorage.key(index);
+        if (oldKey?.startsWith(PREFIX)) originals[oldKey] = globalThis.localStorage.getItem(oldKey)!;
+      }
+      if (!origin) {
+        origin = `web:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+        globalThis.localStorage?.setItem(migrationKey, origin);
+      }
+      if (Object.keys(originals).length && !globalThis.localStorage?.getItem('xeque-palavras:v2:legacy-backup')) {
+        globalThis.localStorage?.setItem('xeque-palavras:v2:legacy-backup', JSON.stringify(originals));
+      }
+    } catch { /* Original entries are still preserved if the backup cannot be written. */ }
+    const results = readResults();
+    const retainedIds = new Set(results.history.map(game => game.id));
+    const importGame = (game: GameState, updatedAt: number, fallbackDay?: string) => {
+      const day = dailyDate(game) ?? fallbackDay ?? localDate(game.startedAt ?? game.finishedAt ?? updatedAt);
+      const id = canonicalGameId(game, day);
+      let imported = parseDocument({ ...emptyDocument(), games: { [id]: { game: { ...game, id }, day, updatedAt } } });
+      if (document.games[id]) imported = mergeDocuments({ ...emptyDocument(), games: { [id]: document.games[id] } }, imported);
+      document.games[id] = imported.games[id];
+      if (imported.results[id]) document.results[id] = imported.results[id];
+      if (imported.conflicts?.[id]) document.conflicts = { ...document.conflicts, [id]: imported.conflicts[id] };
+    };
+    for (const game of results.history) {
+      try { importGame(game, game.finishedAt ?? Date.now()); } catch { /* Invalid legacy identifiers stay only in the backup. */ }
+    }
+    for (const [oldKey, value] of Object.entries(originals)) {
+      if (!oldKey.startsWith(PREFIX + 'game:')) continue;
+      try {
+        const entry = JSON.parse(value) as Record<string, unknown>;
+        const game = parseGame(entry.game);
+        // An old slot may retain a finished game whose result has already moved into the lifetime aggregate.
+        if (game && game.status !== 'playing' && results.beforeHistory.all.played > 0 && !retainedIds.has(game.id)) continue;
+        if (entry.version === 1 && game) importGame(game, isInteger(entry.savedAt, 0, 8640000000000000) ? entry.savedAt : Date.now(), oldKey.match(/:(\d{4}-\d{2}-\d{2})$/)?.[1]);
+      } catch { /* Ignore corrupt legacy entries without removing them. */ }
+    }
+    if (results.beforeHistory.all.played && origin) document.legacy[origin] = results.beforeHistory;
+    if (read('config')) document.config = { value: loadConfig(), updatedAt: 1 };
+    if (read('preferences')) document.preferences = { value: loadPreferences(), updatedAt: 1 };
+    persist();
+  }
+
+  function commit(next: SyncDocument, source: 'local' | 'remote') {
+    if (JSON.stringify(next) === JSON.stringify(document)) return false;
+    document = next; revision++; persist();
+    for (const listener of listeners) listener(source);
+    return true;
+  }
+
+  function patchDocument(patch: Partial<SyncDocument>) {
+    commit(mergeDocuments(document, { ...emptyDocument(), ...patch }), 'local');
+  }
+
+  return {
+    profile,
+    getRevision: () => revision,
+    getDocument: () => structuredClone(document),
+    subscribe(listener: (source: 'local' | 'remote') => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    mergeRemote(value: unknown) { return commit(mergeDocuments(document, parseDocument(value)), 'remote'); },
+    loadConfig: () => ({ ...(document.config?.value ?? DEFAULT_CONFIG) }),
+    saveConfig(value: GameConfig) {
+      const checked = parseConfig(value);
+      if (checked && JSON.stringify(document.config?.value ?? DEFAULT_CONFIG) !== JSON.stringify(checked)) {
+        patchDocument({ config: { value: checked, updatedAt: Date.now() } });
+      }
+    },
+    loadPreferences: () => ({ ...(document.preferences?.value ?? DEFAULT_PREFERENCES) }),
+    savePreferences(value: Preferences) {
+      if (typeof value.highContrast === 'boolean' && typeof value.sound === 'boolean' &&
+        JSON.stringify(document.preferences?.value ?? DEFAULT_PREFERENCES) !== JSON.stringify(value)) {
+        patchDocument({ preferences: { value: { ...value }, updatedAt: Date.now() } });
+      }
+    },
+    loadGame(config: GameConfig, now = Date.now()) {
+      return structuredClone(latestGame(document, config, localDate(now))?.game ?? null);
+    },
+    saveGame(value: GameState) {
+      const game = parseGame(value);
+      if (!game) return;
+      const day = dailyDate(game) ?? localDate(game.startedAt ?? Date.now());
+      const id = canonicalGameId(game, day);
+      const checked = { ...game, id };
+      if (JSON.stringify(document.games[id]?.game) === JSON.stringify(checked)) return;
+      patchDocument({ games: { [id]: { game: checked, day, updatedAt: Date.now() } } });
+    },
+    recordResult(value: GameState) {
+      const game = parseGame(value);
+      if (!game || game.status === 'playing' || game.finishedAt === null) return;
+      const day = dailyDate(game) ?? localDate(game.startedAt ?? game.finishedAt);
+      const id = canonicalGameId(game, day);
+      patchDocument({
+        games: { [id]: { game: { ...game, id }, day, updatedAt: document.games[id]?.updatedAt ?? Date.now() } },
+        results: { [id]: { id, language: game.config.language, won: game.status === 'won', finishedAt: game.finishedAt, attempts: game.guesses.length } },
+      });
+    },
+    getStats: (language?: Language): GameStats => documentStats(document, language),
+    getHistory: (language?: Language) => documentHistory(document, language).slice(0, 50)
+      .map(result => ({ ...result, game: document.games[result.id]?.game ?? null })),
+  };
 }

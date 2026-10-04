@@ -1,13 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { GameState, Language, Mode } from '../src/game/engine';
+import { latestGame, type SyncDocument } from '../src/sync/model';
 
 type Dictionary = { language: Language; count: number; words: string[]; byLength: Record<string, number> };
 
 async function savedGame(page: Page, mode: Mode = 'classic', language: Language = 'pt', length = 5): Promise<GameState> {
-  const game = await page.evaluate(({ mode, language, length }) => {
-    const key = Object.keys(localStorage).find(key => key.startsWith(`xeque-palavras:v1:game:${language}:${mode}:normal:${length}`));
-    return key ? JSON.parse(localStorage.getItem(key)!).game : null;
-  }, { mode, language, length }) as GameState | null;
+  const document = await page.evaluate(() => JSON.parse(localStorage.getItem('xeque-palavras:v2:profile:daniel')!)) as SyncDocument;
+  const day = await page.evaluate(() => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; });
+  const game = latestGame(document, { mode, language, length, difficulty: 'normal' }, day)?.game;
   if (!game) throw new Error(`No saved ${language}/${mode}/${length} game found.`);
   return game;
 }
@@ -48,6 +48,7 @@ test('both bundled dictionaries contain at least 10,000 unique usable words', as
 
 test('a valid keyboard guess wins and the result is counted once across reloads', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   const original = await savedGame(page);
   await enterWord(page, original.targets[0]);
@@ -56,6 +57,7 @@ test('a valid keyboard guess wins and the result is counted once across reloads'
   await expect(page.locator('.word-board .tile.correct')).toHaveCount(5);
 
   await page.reload();
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await expect(page.getByRole('heading', { name: 'Xeque-mate!', exact: true })).toBeVisible();
   expect((await savedGame(page)).id).toBe(original.id);
@@ -70,6 +72,7 @@ test('an unknown word preserves attempts and a corrected entry can win', async (
   const dictionary = await (await request.get('/dictionaries/pt.json')).json() as Dictionary;
   expect(dictionary.words).not.toContain('zzqzz');
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   const original = await savedGame(page);
   await enterWord(page, 'zzqzz');
@@ -88,6 +91,7 @@ test('an unknown word preserves attempts and a corrected entry can win', async (
 
 test('physical Enter submits a word after clicking mode and word-length controls', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await selectMode(page, 'Dueto', 2);
   const duo = await savedGame(page, 'duo');
@@ -107,6 +111,7 @@ test('physical Enter submits a word after clicking mode and word-length controls
 
 test('changing language translates the interface and plays with the English dictionary', async ({ page, request }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   const portuguese = await savedGame(page);
   await page.getByRole('button', { name: 'EN', exact: true }).click();
@@ -121,6 +126,7 @@ test('changing language translates the interface and plays with the English dict
   await enterWord(page, english.targets[0]);
   await expect(page.getByRole('heading', { name: 'Checkmate!', exact: true })).toBeVisible();
   await page.reload();
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('heading', { name: 'Checkmate!', exact: true })).toBeVisible();
@@ -138,6 +144,7 @@ for (const { mode, label, boards } of [
 ] as const) {
   test(`${label} shares guesses across boards and wins only when every target is found`, async ({ page }) => {
     await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
     await ready(page);
     await selectMode(page, label, boards);
     const original = await savedGame(page, mode);
@@ -161,6 +168,7 @@ for (const { mode, label, boards } of [
 
 test('daily progress survives reload and mode changes, and cannot be reset', async ({ page, request }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await selectMode(page, 'Desafio diário', 1);
   const original = await savedGame(page, 'daily');
@@ -170,6 +178,7 @@ test('daily progress survives reload and mode changes, and cannot be reset', asy
   await enterWord(page, miss);
   await expect.poll(async () => (await savedGame(page, 'daily')).guesses).toEqual([miss]);
   await page.reload();
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   expect((await savedGame(page, 'daily')).id).toBe(original.id);
   expect((await savedGame(page, 'daily')).targets).toEqual(original.targets);
@@ -183,6 +192,7 @@ test('daily progress survives reload and mode changes, and cannot be reset', asy
   await expect(page.getByText('Volte amanhã para um novo desafio.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nova partida', exact: true })).toHaveCount(0);
   await page.reload();
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await expect(page.getByRole('heading', { name: 'Xeque-mate!', exact: true })).toBeVisible();
   expect((await savedGame(page, 'daily')).guesses).toEqual([miss, original.targets[0]]);
@@ -191,6 +201,7 @@ test('daily progress survives reload and mode changes, and cannot be reset', asy
 test('Blitz waits for the first valid word and ends when its two-minute clock expires', async ({ page, request }) => {
   await page.clock.install();
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await selectMode(page, 'Blitz', 1);
   await page.clock.fastForward(300_000);
@@ -206,6 +217,7 @@ test('Blitz waits for the first valid word and ends when its two-minute clock ex
   await expect(page.locator('.timer')).toHaveText('00:00');
   expect((await savedGame(page, 'blitz')).status).toBe('lost');
   await page.reload();
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await expect(page.getByRole('heading', { name: 'Toda partida ensina.', exact: true })).toBeVisible();
   expect((await savedGame(page, 'blitz')).id).toBe(original.id);
@@ -213,6 +225,7 @@ test('Blitz waits for the first valid word and ends when its two-minute clock ex
 
 test('Quartet keeps all four five-letter boards on one row at desktop width', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await selectMode(page, 'Quarteto', 4);
   await expect(page.locator('.game-layout')).toHaveClass(/quartet-layout/);
@@ -240,6 +253,7 @@ test('Quartet keeps all four five-letter boards on one row at desktop width', as
 test('mobile Classic fits eight letters and Quartet scrolls internally to all four horizontal boards', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await expect(page.locator('.mobile-mode-nav')).toBeVisible();
 
@@ -306,6 +320,7 @@ test('mobile Classic fits eight letters and Quartet scrolls internally to all fo
 test('mobile players can open their progress and return to the game', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await ready(page);
   await page.locator('.topbar').getByRole('button', { name: 'Meu progresso', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cada jogada conta.', exact: true })).toBeVisible();

@@ -10,8 +10,8 @@ android {
         applicationId = "com.danieltr048.xeque"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
     val releaseStore = providers.environmentVariable("XEQUE_KEYSTORE").orNull
     if (releaseStore != null) {
@@ -38,7 +38,7 @@ android {
     bundle { language { enableSplit = false } }
 }
 
-dependencies { testImplementation("junit:junit:4.13.2") }
+dependencies { testImplementation("junit:junit:4.13.2"); testImplementation("org.json:json:20240303") }
 
 tasks.named("preBuild") {
     doFirst {

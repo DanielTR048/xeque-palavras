@@ -27,3 +27,5 @@ android/app/src/main/assets/licenses/
 keystore.properties
 *.apk
 *.aab
+.wrangler/
+.dev.vars

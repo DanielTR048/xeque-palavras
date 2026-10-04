@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame, type GameConfig, type GameState } from './engine';
-import { getHistory, getStats, isStorageAvailable, loadConfig, loadGame, loadPreferences, recordResult, saveConfig, saveGame, savePreferences } from './storage';
+import { createProfileStorage, getHistory, getStats, isStorageAvailable, loadConfig, loadGame, loadPreferences, recordResult, saveConfig, saveGame, savePreferences } from './storage';
+import { emptyDocument } from '../sync/model';
 
 const PREFIX = 'xeque-palavras:v1:';
 const config: GameConfig = { language: 'pt', mode: 'classic', difficulty: 'normal', length: 5 };
@@ -28,6 +29,95 @@ beforeEach(() => {
     setItem: (key: string, value: string) => { values.set(key, value); },
     removeItem: (key: string) => { values.delete(key); },
     clear: () => { values.clear(); },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    get length() { return values.size; },
+  });
+});
+
+describe('personal profiles', () => {
+  it('migrates old games to Daniel once and preserves every original byte as backup', () => {
+    saveGame(game({ guesses: ['termo'], startedAt: 1000 }));
+    recordResult(won());
+    saveConfig({ ...config, language: 'en' });
+    savePreferences({ highContrast: true, sound: true });
+    const originals = new Map(values);
+    const larissa = createProfileStorage('larissa');
+    expect(larissa.loadGame(config)).toBeNull();
+    expect(larissa.getStats().played).toBe(0);
+    const daniel = createProfileStorage('daniel');
+    expect(daniel.loadGame(config)?.guesses).toEqual(['termo']);
+    expect(daniel.getStats().won).toBe(1);
+    expect(daniel.loadConfig().language).toBe('en');
+    expect(daniel.loadPreferences()).toEqual({ highContrast: true, sound: true });
+    for (const [key, value] of originals) expect(values.get(key)).toBe(value);
+    expect(JSON.parse(values.get('xeque-palavras:v2:legacy-backup')!)).toEqual(Object.fromEntries(originals));
+    expect(createProfileStorage('daniel').getStats().played).toBe(1);
+    expect(createProfileStorage('larissa').getStats().played).toBe(0);
+  });
+
+  it('keeps delayed writes, game choices and preferences bound to their original profile', () => {
+    const daniel = createProfileStorage('daniel');
+    const larissa = createProfileStorage('larissa');
+    daniel.saveConfig({ ...config, difficulty: 'hard' });
+    larissa.saveConfig({ ...config, language: 'en' });
+    daniel.savePreferences({ highContrast: true, sound: false });
+    const delayedWrite = () => { daniel.saveGame(won('daniel-win')); daniel.recordResult(won('daniel-win')); };
+    larissa.saveGame(game({ id: 'larissa-game' }));
+    delayedWrite();
+    expect(larissa.loadConfig().language).toBe('en');
+    expect(larissa.loadPreferences().highContrast).toBe(false);
+    expect(larissa.loadGame(config)?.id).toBe('larissa-game');
+    expect(larissa.getStats().played).toBe(0);
+    expect(createProfileStorage('daniel').getStats().won).toBe(1);
+    expect(createProfileStorage('daniel').loadConfig().difficulty).toBe('hard');
+  });
+
+  it('preserves lifetime totals older than the retained history without double counting after cloud echo', () => {
+    const history = Array.from({ length: 500 }, (_, index) => won(`old-${index}`, 1000 + index));
+    const totals = { played: 600, won: 600, currentStreak: 600, bestStreak: 600, distribution: { 1: 600 } };
+    values.set(PREFIX + 'results', JSON.stringify({ version: 1, history, seenIds: history.map(item => item.id), stats: {
+      all: totals, pt: totals, en: { played: 0, won: 0, currentStreak: 0, bestStreak: 0, distribution: {} },
+    } }));
+    const daniel = createProfileStorage('daniel');
+    expect(daniel.getStats().played).toBe(600);
+    expect(Object.keys(daniel.getDocument().legacy)).toHaveLength(1);
+    daniel.mergeRemote(daniel.getDocument());
+    expect(createProfileStorage('daniel').getStats().played).toBe(600);
+  });
+
+  it('merges stale cloud replies into current progress instead of losing an in-flight guess', () => {
+    const daniel = createProfileStorage('daniel');
+    daniel.saveGame(game());
+    const stale = daniel.getDocument();
+    daniel.saveGame(won('game-1'));
+    daniel.recordResult(won('game-1'));
+    daniel.mergeRemote(stale);
+    expect(daniel.loadGame(config)?.status).toBe('won');
+    expect(daniel.getStats().played).toBe(1);
+    expect(() => daniel.mergeRemote({ ...emptyDocument(), version: 100 })).toThrow();
+    expect(daniel.loadGame(config)?.status).toBe('won');
+  });
+
+  it('does not count an evicted terminal game slot a second time during legacy migration', () => {
+    const old = won('evicted');
+    const earlier = { played: 1, won: 1, currentStreak: 1, bestStreak: 1, distribution: { 1: 1 } };
+    const zero = { played: 0, won: 0, currentStreak: 0, bestStreak: 0, distribution: {} };
+    values.set(PREFIX + 'results', JSON.stringify({ version: 1, history: [], seenIds: ['evicted'], beforeHistory: { all: earlier, pt: earlier, en: zero } }));
+    values.set(PREFIX + 'game:pt:classic:normal:5', JSON.stringify({ version: 1, savedAt: 3000, game: old }));
+    const daniel = createProfileStorage('daniel');
+    expect(daniel.getStats().played).toBe(1);
+    expect(daniel.getStats().won).toBe(1);
+    expect(JSON.parse(values.get('xeque-palavras:v2:legacy-backup')!)[PREFIX + 'game:pt:classic:normal:5']).toBe(values.get(PREFIX + 'game:pt:classic:normal:5'));
+  });
+
+  it('backs up an unreadable profile document before any new progress can replace it', () => {
+    const key = 'xeque-palavras:v2:profile:daniel';
+    const original = '{"version":1,"games":broken';
+    values.set(key, original);
+    const daniel = createProfileStorage('daniel');
+    daniel.saveGame(game());
+    expect([...values.entries()].find(([entry]) => entry.startsWith(key + ':recovery:'))?.[1]).toBe(original);
+    expect(daniel.loadGame(config)?.id).toBe('game-1');
   });
 });
 

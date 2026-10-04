@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Canvas
@@ -25,6 +26,7 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.animation.DecelerateInterpolator
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -45,6 +47,14 @@ class MainActivity : Activity() {
     private val gold = Color.rgb(174, 143, 65)
     private val gray = Color.rgb(119, 128, 111)
     private lateinit var store: NativeStore
+    private val stores = mutableMapOf<String, NativeStore>()
+    private var activeProfile: String? = null
+    private var profileGeneration = 0
+    private lateinit var pairing: DevicePairing
+    private lateinit var sync: NativeSync
+    private var syncState = "unpaired"
+    private var syncLabel: TextView? = null
+    private var pairingBusy = false
     private lateinit var shell: LinearLayout
     private lateinit var content: LinearLayout
     private lateinit var verticalScroll: ScrollView
@@ -70,6 +80,7 @@ class MainActivity : Activity() {
     private val boardTabs = mutableListOf<Button>()
     private val keyViews = mutableMapOf<Char, Button>()
     private var loading = false
+    private var syncTicks = 0
     private val ticker = object : Runnable {
         override fun run() {
             val current = game
@@ -81,13 +92,34 @@ class MainActivity : Activity() {
                     else if (::timeLabel.isInitialized) updateMeta()
                 }
             }
+            if (++syncTicks % 30 == 0) stores.values.forEach { sync.request(it, profileGeneration, true) }
             handler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        store = NativeStore(this); config = store.config(); localize()
+        pairing = DevicePairing(this)
+        stores["daniel"] = NativeStore(this, "daniel")
+        stores["larissa"] = NativeStore(this, "larissa")
+        store = stores.getValue("daniel"); config = store.config(); localize()
+        sync = NativeSync(this, pairing, { source, token -> activeProfile == source.profile && token == profileGeneration },
+            { source, state, applied ->
+                if (activeProfile == source.profile) {
+                    syncState = state
+                    if (applied) {
+                        val incomingConfig = store.config()
+                        val incoming = store.load(incomingConfig)
+                        if (incomingConfig != config || incoming != game) {
+                            config = incomingConfig; localize(); restoredDraft = null; cursor = 0; loadGame()
+                        }
+                    }
+                    updateSyncLabel()
+                }
+            })
+        stores.values.forEach { source -> source.onChange = {
+            sync.request(source, profileGeneration)
+        } }
         restoredDraft = savedInstanceState?.getString("draft")
         cursor = savedInstanceState?.getInt("cursor") ?: 0
         shell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(cream) }
@@ -107,10 +139,13 @@ class MainActivity : Activity() {
         }
         setContentView(shell)
         loadDictionaries()
+        handlePairingIntent(intent)
     }
-    override fun onResume() { super.onResume(); handler.removeCallbacks(ticker); handler.post(ticker) }
-    override fun onPause() { game?.let(store::save); handler.removeCallbacks(ticker); super.onPause() }
-    override fun onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy() }
+    override fun onResume() { super.onResume(); handler.removeCallbacks(ticker); handler.post(ticker)
+        stores.values.forEach { sync.request(it, profileGeneration, true) } }
+    override fun onPause() { game?.let { store.save(it) }; handler.removeCallbacks(ticker); super.onPause() }
+    override fun onDestroy() { handler.removeCallbacksAndMessages(null); sync.close(); super.onDestroy() }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handlePairingIntent(intent) }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("draft", String(draft)); outState.putInt("cursor", cursor); super.onSaveInstanceState(outState)
     }
@@ -165,7 +200,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 loading = false
-                if (result.isSuccess) loadGame()
+                if (result.isSuccess) showProfiles()
                 else {
                     shell.removeAllViews(); shell.addView(label(tr(R.string.load_error), 18f).apply { setPadding(dp(24), dp(48), dp(24), dp(24)) })
                     shell.addView(button(tr(R.string.retry)) { loadDictionaries() })
@@ -173,23 +208,139 @@ class MainActivity : Activity() {
             }
         }.start()
     }
+    private fun profileName(profile: String) = if (profile == "larissa") "Larissa" else "Daniel"
+    private fun showProfiles() {
+        game?.let { store.save(it) }; game = null; activeProfile = null; profileGeneration++; generation++
+        restoredDraft = null; syncLabel = null
+        shell.removeAllViews()
+        val screen = column().apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(32), dp(24), dp(36)) }
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(screen) }
+        shell.addView(scroll, LinearLayout.LayoutParams(-1, -1))
+        screen.addView(label("♞ xeque.", 42f, green, true).apply { gravity = Gravity.CENTER })
+        screen.addView(spacer(30))
+        screen.addView(label(tr(R.string.choose_profile), 29f, ink).apply { gravity = Gravity.CENTER; typeface = Typeface.create("serif", Typeface.NORMAL) })
+        screen.addView(label(tr(R.string.profile_intro), 14f, muted).apply { gravity = Gravity.CENTER })
+        screen.addView(spacer(24))
+        val cards = row().apply { gravity = Gravity.CENTER }
+        listOf("daniel", "larissa").forEachIndexed { index, profile ->
+            val color = if (profile == "daniel") green else Color.rgb(117, 67, 91)
+            val background = if (profile == "daniel") Color.rgb(222, 234, 209) else Color.rgb(240, 220, 226)
+            val profileCard = column().apply {
+                gravity = Gravity.CENTER; setPadding(dp(8), dp(18), dp(8), dp(18))
+                this.background = RippleDrawable(ColorStateList.valueOf(0x22557744), rounded(background, 22), null)
+                isClickable = true; isFocusable = true; contentDescription = tr(R.string.play_as, profileName(profile))
+                setOnClickListener { selectProfile(profile) }
+            }
+            profileCard.addView(label(if (profile == "daniel") "♞" else "♛", 74f, color).apply { gravity = Gravity.CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+            profileCard.addView(label(profileName(profile), 22f, color, true).apply { gravity = Gravity.CENTER })
+            profileCard.addView(label(tr(R.string.your_board), 11f, color).apply { gravity = Gravity.CENTER })
+            cards.addView(profileCard, LinearLayout.LayoutParams(0, dp(200), 1f).apply { setMargins(dp(5), 0, dp(5), 0) })
+            if (ValueAnimator.areAnimatorsEnabled()) {
+                profileCard.alpha = 0f; profileCard.translationY = dp(18).toFloat()
+                profileCard.animate().alpha(1f).translationY(0f).setStartDelay(index * 100L).setDuration(330).start()
+            }
+        }
+        screen.addView(cards, LinearLayout.LayoutParams(-1, -2)); screen.addView(spacer(24))
+        screen.addView(label(tr(R.string.profile_privacy), 12f, muted).apply { gravity = Gravity.CENTER })
+        screen.addView(spacer(16))
+        screen.addView(button(tr(if (pairing.connected()) R.string.device_connected else R.string.connect_site)) { showConnection() }, LinearLayout.LayoutParams(-1, dp(48)))
+    }
+    private fun selectProfile(profile: String) {
+        profileGeneration++; generation++; activeProfile = profile; store = stores.getValue(profile)
+        config = store.config(); localize(); restoredDraft = null; cursor = 0
+        syncState = if (pairing.connected()) "syncing" else "unpaired"
+        loadGame(); sync.request(store, profileGeneration, true)
+    }
+    private fun syncText(): String = tr(when (syncState) {
+        "synced" -> R.string.sync_synced; "syncing" -> R.string.sync_syncing; "offline" -> R.string.sync_offline
+        "reconnect" -> R.string.sync_reconnect; "capacity" -> R.string.sync_capacity; "retry" -> R.string.sync_retry
+        else -> R.string.sync_unpaired
+    })
+    private fun updateSyncLabel() { syncLabel?.text = syncText() }
+    private fun showConnection() {
+        val builder = AlertDialog.Builder(this).setTitle(tr(R.string.connect_site)).setMessage(tr(R.string.connection_explanation))
+            .setNegativeButton(tr(R.string.close), null)
+        if (pairing.connected() && syncState != "reconnect") builder.setMessage(tr(R.string.connection_connected))
+            .setPositiveButton(tr(R.string.sync_now)) { _, _ -> if (activeProfile != null) sync.request(store, profileGeneration, true) }
+            .setNeutralButton(tr(R.string.disconnect)) { _, _ ->
+                AlertDialog.Builder(this).setTitle(tr(R.string.disconnect)).setMessage(tr(R.string.disconnect_note))
+                    .setNegativeButton(tr(R.string.cancel), null).setPositiveButton(tr(R.string.disconnect)) { _, _ ->
+                        pairing.disconnect(); profileGeneration++; syncState = "unpaired"; updateSyncLabel()
+                        if (activeProfile == null) showProfiles()
+                    }.show()
+            }
+        else builder.setPositiveButton(tr(R.string.connect_browser)) { _, _ -> beginPairing() }
+            .setNeutralButton(tr(R.string.paste_pair_code)) { _, _ -> pastePairing() }
+        builder.show()
+    }
+    private fun beginPairing() {
+        if (pairingBusy) return
+        pairingBusy = true
+        Thread {
+            val result = runCatching { pairing.begin() }
+            runOnUiThread {
+                pairingBusy = false; if (isDestroyed) return@runOnUiThread
+                result.onSuccess { (url, fingerprint) ->
+                    AlertDialog.Builder(this).setTitle(tr(R.string.pairing_fingerprint))
+                        .setMessage(tr(R.string.pairing_fingerprint_note, fingerprint))
+                        .setNegativeButton(tr(R.string.cancel), null).setPositiveButton(tr(R.string.connect_browser)) { _, _ ->
+                            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { pairingError() }
+                        }.show()
+                }.onFailure { pairingError() }
+            }
+        }.start()
+    }
+    private fun pastePairing() {
+        val input = EditText(this).apply { hint = tr(R.string.paste_pair_code); setSingleLine(false); maxLines = 5 }
+        AlertDialog.Builder(this).setTitle(tr(R.string.paste_pair_code)).setView(input)
+            .setNegativeButton(tr(R.string.cancel), null).setPositiveButton(tr(R.string.connect_site)) { _, _ ->
+                val value = input.text.toString().trim()
+                acceptPairing(if (value.startsWith("xeque://pair?")) Uri.parse(value).getQueryParameter("payload") ?: "" else value)
+            }.show()
+    }
+    private fun handlePairingIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "xeque" || uri.host != "pair") return
+        intent.data = null
+        uri.getQueryParameter("payload")?.let(::acceptPairing)
+    }
+    private fun acceptPairing(payload: String) {
+        if (pairingBusy) return
+        pairingBusy = true
+        Thread {
+            val accepted = runCatching { pairing.accept(payload) }.isSuccess
+            runOnUiThread {
+                pairingBusy = false; if (isDestroyed) return@runOnUiThread
+                if (accepted) {
+                    syncState = "syncing"
+                    if (activeProfile != null) { updateSyncLabel(); stores.values.forEach { sync.request(it, profileGeneration, true) } }
+                    else if (!loading) showProfiles()
+                    AlertDialog.Builder(this).setTitle(tr(R.string.device_connected)).setMessage(tr(R.string.connection_connected))
+                        .setPositiveButton(tr(R.string.close), null).show()
+                } else pairingError()
+            }
+        }.start()
+    }
+    private fun pairingError() { AlertDialog.Builder(this).setTitle(tr(R.string.connect_site)).setMessage(tr(R.string.pairing_error))
+        .setPositiveButton(tr(R.string.close), null).show() }
     private fun targetPool(): List<String> = if (config.difficulty == "hard") words.getValue(config.language).filter { it.length == config.length }
         else common.getValue(config.language).getValue(config.length)
     private fun loadGame() {
-        generation++; game = store.load(config) ?: GameEngine.create(config, targetPool())
+        val saved = store.load(config)
+        generation++; game = saved ?: GameEngine.create(config, targetPool())
         draft = CharArray(config.length) { ' ' }
         restoredDraft?.takeIf { it.length == config.length && game?.status == "playing" }?.let { draft = it.toCharArray() }
         restoredDraft = null; cursor = cursor.coerceIn(0, config.length); selectedBoard = 0
-        store.saveConfig(config); game?.let(store::save); renderGame()
+        store.saveConfig(config, provisional = true); game?.let { store.save(it, provisional = saved == null) }; renderGame()
     }
     private fun changeConfig(next: GameConfig) {
         if (next == config) return
-        game?.let(store::save); config = next; cursor = 0; localize(); loadGame()
+        game?.let { store.save(it) }; config = next; store.saveConfig(next); cursor = 0; localize(); loadGame()
     }
     private fun startNew() {
         if (config.mode == "daily") return
         generation++; game = GameEngine.create(config, targetPool()); draft = CharArray(config.length) { ' ' }; cursor = 0; selectedBoard = 0
-        game?.let(store::save); renderGame()
+        game?.let { store.save(it) }; renderGame()
     }
     private fun requestNew() {
         if (game?.status == "playing" && game?.guesses?.isNotEmpty() == true) AlertDialog.Builder(this)
@@ -210,6 +361,16 @@ class MainActivity : Activity() {
         listOf("pt", "en").forEach { language -> header.addView(button(language.uppercase(), config.language == language) { changeConfig(config.copy(language = language)) }, LinearLayout.LayoutParams(dp(44), dp(42)).apply { marginStart = dp(4) }) }
         header.addView(button("▥") { showStats() }.apply { contentDescription = tr(R.string.stats) }, LinearLayout.LayoutParams(dp(44), dp(42)).apply { marginStart = dp(4) })
         content.addView(header)
+        val profileBar = row()
+        profileBar.addView(label("${if (activeProfile == "larissa") "♛" else "♞"} ${profileName(activeProfile ?: "daniel")}", 16f, green, true), LinearLayout.LayoutParams(0, dp(44), 1f))
+        profileBar.addView(button(tr(R.string.switch_profile)) { showProfiles() })
+        content.addView(profileBar)
+        syncLabel = label(syncText(), 12f, muted).apply {
+            minHeight = dp(44); gravity = Gravity.CENTER_VERTICAL; isClickable = true; isFocusable = true
+            contentDescription = tr(R.string.connect_site)
+            setOnClickListener { if (pairing.connected() && syncState !in listOf("reconnect", "unpaired")) sync.request(store, profileGeneration, true) else showConnection() }
+        }
+        content.addView(syncLabel)
         content.addView(label(tr(R.string.tagline), 22f, green).apply { typeface = Typeface.create("serif", Typeface.NORMAL) })
         content.addView(label(tr(R.string.intro), 11f, muted))
         val modeRow = row()
@@ -454,7 +615,7 @@ class MainActivity : Activity() {
     private fun showStats() {
         val stats = store.stats(config.language)
         val percentage = if (stats.played == 0) 0 else stats.won * 100 / stats.played
-        val text = "${tr(R.string.played)}: ${stats.played}\n${tr(R.string.wins)}: ${stats.won}\n${tr(R.string.win_rate)}: $percentage%\n${tr(R.string.streak)}: ${stats.streak}\n${tr(R.string.best)}: ${stats.best}\n\n${tr(R.string.stats_note)}"
+        val text = "${profileName(activeProfile ?: "daniel")}\n\n${tr(R.string.played)}: ${stats.played}\n${tr(R.string.wins)}: ${stats.won}\n${tr(R.string.win_rate)}: $percentage%\n${tr(R.string.streak)}: ${stats.streak}\n${tr(R.string.best)}: ${stats.best}\n\n${tr(R.string.stats_note)}"
         AlertDialog.Builder(this).setTitle("▥ ${tr(R.string.stats)}").setMessage(text).setPositiveButton(tr(R.string.close), null).show()
     }
     private fun showHelp() { AlertDialog.Builder(this).setTitle("♞ ${tr(R.string.help)}").setMessage(tr(R.string.help_text)).setPositiveButton(tr(R.string.close), null).show() }

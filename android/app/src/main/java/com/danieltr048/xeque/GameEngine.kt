@@ -61,7 +61,8 @@ object GameEngine {
         }
         repeat(count) { index -> val selected = index + (next() * (words.size - index)).toInt()
             val previous = words[index]; words[index] = words[selected]; words[selected] = previous }
-        return Game("${config.mode}:$date:${UUID.randomUUID()}", config, words.take(count), date)
+        val id = if (config.mode == "daily") "daily:$date:${config.language}:${config.difficulty}:${config.length}" else "${config.mode}:$date:${UUID.randomUUID()}"
+        return Game(id, config, words.take(count), date)
     }
 
     fun remaining(game: Game, now: Long = System.currentTimeMillis()): Int? {

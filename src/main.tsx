@@ -6,4 +6,5 @@ import '@fontsource/libre-caslon-display/latin-400.css';
 import './styles.css';
 import './quartet.css';
 import './motion.css';
+import './profiles/profiles.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

@@ -1,0 +1,11 @@
+{
+  "name": "xeque-local",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-05-15",
+  "d1_databases": [{
+    "binding": "DB", "database_name": "xeque-local",
+    "database_id": "00000000-0000-4000-8000-000000000000",
+    "migrations_dir": "drizzle"
+  }],
+  "vars": { "LOCAL_TEST_OWNER": "local-test-owner", "SITES_DEVICE_GATE": "local-test-gate" }
+}

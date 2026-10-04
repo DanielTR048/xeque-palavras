@@ -100,8 +100,8 @@ try {
     Assert-ExitCode 'APK signature verification'
     $permissions = (& $aapt dump permissions $apk 2>&1) -join "`n"
     Assert-ExitCode 'APK permission inspection'
-    if ($permissions -match 'android\.permission\.INTERNET') {
-        throw 'The offline native APK unexpectedly requests Internet access.'
+    if ($permissions -notmatch 'android\.permission\.INTERNET') {
+        throw 'Profile synchronization requires the Android Internet permission.'
     }
     $badging = (& $aapt dump badging $apk 2>&1) -join "`n"
     Assert-ExitCode 'APK metadata inspection'
@@ -131,7 +131,7 @@ try {
     Copy-Item -LiteralPath $apk -Destination $outputApk -Force
     $hash = (Get-FileHash -LiteralPath $outputApk -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $(Split-Path -Leaf $outputApk)" | Set-Content -LiteralPath "$outputApk.sha256" -Encoding ascii
-    Write-Output 'Verified native APK has no Internet permission and includes offline dictionaries and licenses.'
+    Write-Output 'Verified signed native APK includes offline dictionaries and optional profile synchronization.'
     Write-Output "APK: $outputApk"
     Write-Output "SHA-256: $hash"
 } finally {

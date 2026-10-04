@@ -1,16 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { GameState, Mode } from '../src/game/engine';
+import { latestGame, type SyncDocument } from '../src/sync/model';
 
 async function gameState(page: Page, mode: Mode = 'classic'): Promise<GameState> {
-  return page.evaluate(mode => {
-    const key = Object.keys(localStorage).find(key => key.startsWith(`xeque-palavras:v1:game:pt:${mode}:normal:5`));
-    if (!key) throw new Error(`Missing saved ${mode} game.`);
-    return JSON.parse(localStorage.getItem(key)!).game;
-  }, mode);
+  const document = await page.evaluate(() => JSON.parse(localStorage.getItem('xeque-palavras:v2:profile:daniel')!)) as SyncDocument;
+  const day = await page.evaluate(() => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; });
+  const game = latestGame(document, { mode, language: 'pt', length: 5, difficulty: 'normal' }, day)?.game;
+  if (!game) throw new Error(`Missing saved ${mode} game.`);
+  return game;
 }
 
 async function openGame(page: Page) {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await expect(page.locator('.word-board')).toHaveCount(1);
   await page.getByRole('heading', { level: 1 }).click();
 }
@@ -50,6 +52,7 @@ test('new victories reveal and celebrate, but restored victories do not replay a
   await expect(page.locator('.celebration')).toHaveAttribute('aria-hidden', 'true');
   await expect(page.locator('.board-celebrate')).toHaveCount(1);
   await page.reload();
+  await page.getByRole('button', { name: 'Daniel', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Xeque-mate!', exact: true })).toBeVisible();
   await expect(page.locator('.row-reveal, .board-celebrate, .fresh-result, .celebration')).toHaveCount(0);
   expect((await gameState(page)).id).toBe(game.id);

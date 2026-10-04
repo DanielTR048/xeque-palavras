@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ArrowRight, BarChart3, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Delete, Download, Flame, Globe2, Grid2X2, Infinity as InfinityIcon, Lightbulb, RotateCcw, Settings2, Share2, ShieldCheck, Trophy, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BarChart3, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Delete, Download, Flame, Globe2, Grid2X2, Infinity as InfinityIcon, Lightbulb, RotateCcw, Settings2, Share2, Trophy, Users, X } from 'lucide-react';
 import { createGame, evaluateGuess, expireGame, getBoardCount, getDailyKey, getKeyboardStates, getMaxAttempts, getRemainingSeconds, isBoardSolved, normalizeWord, submitGuess, type Difficulty, type GameConfig, type GameState, type Language, type Mode } from './game/engine';
-import { getHistory, getStats, isStorageAvailable, loadConfig, loadGame, loadPreferences, recordResult, saveConfig, saveGame, savePreferences } from './game/storage';
+import { createProfileStorage, isStorageAvailable, type ProfileStorage } from './game/storage';
 import { COMMON_WORDS } from './data/common-words';
 import { translations } from './i18n';
 import { useGameMotion } from './game/useGameMotion';
+import { ProfileChooser } from './profiles/ProfileChooser';
+import { ConnectPage } from './profiles/ConnectPage';
+import { profileName, type ProfileId } from './profiles/profiles';
+import { useProfileSync, type ProfileSync } from './profiles/useProfileSync';
+import { SyncIndicator, SyncPanel } from './profiles/SyncPanel';
 
 type Dictionary = { language: Language; words: string[]; count: number; byLength: Record<string, number>; source: string };
 type Modal = 'help' | 'settings' | 'restart' | 'sources' | null;
@@ -31,6 +36,21 @@ function playTone(won: boolean) {
 }
 
 export default function App() {
+  if (window.location.pathname.replace(/\/$/, '') === '/connect') return <ConnectPage />;
+  return <ProfileApp />;
+}
+
+function ProfileApp() {
+  const [profile, setProfile] = useState<ProfileId | null>(null);
+  const stores = useMemo(() => ({ daniel: createProfileStorage('daniel'), larissa: createProfileStorage('larissa') }), []);
+  // Both queues stay alive when switching profiles, so Daniel's last move still uploads while Larissa plays.
+  const danielSync = useProfileSync(stores.daniel);
+  const larissaSync = useProfileSync(stores.larissa);
+  return profile ? <GameApp key={profile} profile={profile} storage={stores[profile]} sync={profile === 'daniel' ? danielSync : larissaSync} onSwitchProfile={() => setProfile(null)} /> : <ProfileChooser onSelect={setProfile} />;
+}
+
+function GameApp({ profile, storage, sync, onSwitchProfile }: { profile: ProfileId; storage: ProfileStorage; sync: ProfileSync; onSwitchProfile: () => void }) {
+  const { loadConfig, saveConfig, loadGame, saveGame, loadPreferences, savePreferences, getStats, getHistory, recordResult } = storage;
   const [config, setConfig] = useState<GameConfig>(loadConfig);
   const [game, setGame] = useState<GameState | null>(null);
   const [dictionary, setDictionary] = useState<Dictionary | null>(null);
@@ -55,6 +75,30 @@ export default function App() {
   const validWords = useMemo(() => new Set(dictionary?.words ?? []), [dictionary]);
   const stats = useMemo(() => getStats(config.language), [config.language, statsVersion]);
   const history = useMemo(() => getHistory(config.language), [config.language, statsVersion]);
+  const gameRef = useRef(game);
+  const configRef = useRef(config);
+  const loadedSlotRef = useRef('');
+  gameRef.current = game;
+  configRef.current = config;
+
+  useEffect(() => storage.subscribe(source => {
+    if (source !== 'remote') return;
+    const nextConfig = storage.loadConfig();
+    setPreferences(previous => {
+      const next = storage.loadPreferences();
+      return previous.highContrast === next.highContrast && previous.sound === next.sound ? previous : next;
+    });
+    setStatsVersion(value => value + 1);
+    if (JSON.stringify(nextConfig) !== JSON.stringify(configRef.current)) {
+      setConfig(nextConfig); setGame(null); return;
+    }
+    const incoming = storage.loadGame(nextConfig);
+    const current = gameRef.current;
+    if (!incoming || JSON.stringify(incoming) === JSON.stringify(current)) return;
+    const boardChanged = !current || JSON.stringify(incoming.guesses) !== JSON.stringify(current.guesses) || JSON.stringify(incoming.targets) !== JSON.stringify(current.targets) || incoming.status !== current.status;
+    setGame(expireGame(incoming));
+    if (boardChanged) { setDraft(Array(nextConfig.length).fill('')); setCursor(0); setSelectedBoard(0); setShareFallback(''); }
+  }), [storage]);
 
   useEffect(() => {
     document.documentElement.lang = config.language === 'pt' ? 'pt-BR' : 'en';
@@ -85,10 +129,14 @@ export default function App() {
 
   useEffect(() => {
     if (!targetPool.length) return;
+    const slot = `${JSON.stringify(config)}:${config.mode === 'daily' ? dailyKey : ''}`;
+    if (loadedSlotRef.current === slot && gameRef.current) return;
     const saved = loadGame(config);
+    if (!saved && !sync.ready) return;
+    loadedSlotRef.current = slot;
     setGame(saved ? expireGame(saved) : createGame(config, targetPool));
     setDraft(Array(config.length).fill('')); setCursor(0); setSelectedBoard(0); setShareFallback('');
-  }, [config, targetPool, config.mode === 'daily' ? dailyKey : '']);
+  }, [config, targetPool, config.mode === 'daily' ? dailyKey : '', sync.ready]);
 
   useEffect(() => {
     if (!game) return;
@@ -221,7 +269,7 @@ export default function App() {
     </aside>
 
     <div className="workspace">
-      <header className="topbar"><div className="breadcrumb"><a className="mobile-brand" href="#" onClick={event => { event.preventDefault(); setPage('play'); }}>xeque<span>.</span></a><span className="desktop-play">{t.play}</span><ChevronRight size={13} /><strong>{page === 'stats' ? t.stats : t[config.mode]}</strong></div><div className="top-actions"><div className="language-switch" aria-label={t.language}><Globe2 size={15} />{(['pt', 'en'] as Language[]).map(language => <button key={language} onClick={() => changeConfig({ language })} className={config.language === language ? 'active' : ''} aria-pressed={config.language === language}>{language.toUpperCase()}</button>)}</div><span className="action-divider" /><button className="icon-button mobile-stats" aria-label={t.stats} onClick={() => setPage('stats')}><BarChart3 size={20} /></button><button className="icon-button" aria-label={t.how} onClick={() => setModal('help')}><CircleHelp size={20} /></button><button className="icon-button" aria-label={t.settings} onClick={() => setModal('settings')}><Settings2 size={20} /></button></div></header>
+      <header className="topbar"><div className="breadcrumb"><a className="mobile-brand" href="#" onClick={event => { event.preventDefault(); setPage('play'); }}>xeque<span>.</span></a><span className="desktop-play">{t.play}</span><ChevronRight size={13} /><strong>{page === 'stats' ? t.stats : t[config.mode]}</strong></div><div className="top-actions"><button className="profile-current" onClick={onSwitchProfile} aria-label={`${config.language === 'pt' ? 'Trocar perfil' : 'Switch profile'}: ${profileName(profile)}`}><span className={`profile-mini-avatar ${profile === 'larissa' ? 'rose' : ''}`} aria-hidden="true">{profile === 'daniel' ? '♞' : '♛'}</span><span className="profile-current-name">{profileName(profile)}</span><Users size={13} /></button><div className="language-switch" aria-label={t.language}><Globe2 size={15} />{(['pt', 'en'] as Language[]).map(language => <button key={language} onClick={() => changeConfig({ language })} className={config.language === language ? 'active' : ''} aria-pressed={config.language === language}>{language.toUpperCase()}</button>)}</div><span className="action-divider" /><button className="icon-button mobile-stats" aria-label={t.stats} onClick={() => setPage('stats')}><BarChart3 size={20} /></button><button className="icon-button" aria-label={t.how} onClick={() => setModal('help')}><CircleHelp size={20} /></button><button className="icon-button" aria-label={t.settings} onClick={() => setModal('settings')}><Settings2 size={20} /></button></div></header>
       <main>
         {page === 'play' ? <>
           <section className="intro"><div><div className="eyebrow"><span />{config.mode === 'daily' ? t.dailyBadge : t.practice}</div><h1>{t.welcome} <em>{t.welcomeItalic}</em></h1><p>{t.intro}</p></div><div className="intro-decoration" aria-hidden="true"><div className="decoration-checker" /><span>♞</span></div></section>
@@ -280,7 +328,7 @@ export default function App() {
               </>}
 
               <div className="legend"><span><i className="correct" />{t.correct}</span><span><i className="present" />{t.present}</span><span><i className="absent" />{t.absent}</span></div>
-              <div className="play-card-footer"><span>{storageAvailable ? <ShieldCheck size={13} /> : <CircleHelp size={13} />}{storageAvailable ? t.saved : t.unsaved}</span>{config.mode !== 'daily' && <button disabled={!game} onClick={() => game?.status === 'playing' && game.guesses.length > 0 ? setModal('restart') : startNewGame()}><RotateCcw size={13} />{t.newGame}</button>}</div>
+              <div className="play-card-footer"><span>{storageAvailable ? <SyncIndicator sync={sync} language={config.language} onClick={() => setModal('settings')} /> : <><CircleHelp size={13} />{t.unsaved}</>}</span>{config.mode !== 'daily' && <button disabled={!game} onClick={() => game?.status === 'playing' && game.guesses.length > 0 ? setModal('restart') : startNewGame()}><RotateCcw size={13} />{t.newGame}</button>}</div>
             </section>
 
             <aside className="right-panel">
@@ -290,14 +338,14 @@ export default function App() {
               <button className="dictionary-note" onClick={() => setModal('sources')}><BookOpen size={15} /><span><strong>{dictionary ? new Intl.NumberFormat(config.language).format(dictionary.count) : '10.000+'}</strong> {t.dictionary}<small>{config.language === 'pt' ? 'Português' : 'English'} · {config.length} {t.letters}: {dictionary?.byLength[String(config.length)]?.toLocaleString(config.language) ?? '…'}</small></span></button>
             </aside>
           </div>
-        </> : <section className="progress-page"><button className="text-button" onClick={() => setPage('play')}><ArrowLeft size={16} />{t.backToGame}</button><div className="eyebrow"><span />{t.stats}</div><h1>{t.progressTitle}</h1><p className="progress-description">{t.progressDesc}</p><div className="stats-grid">{[{ icon: Grid2X2, value: stats.played, label: t.played }, { icon: Trophy, value: stats.won, label: t.victories }, { icon: BarChart3, value: `${stats.winRate}%`, label: t.winRate }, { icon: Flame, value: stats.currentStreak, label: t.streak }].map(({ icon: Icon, value, label }) => <div className="stat-card" key={label}><Icon size={21} /><strong>{value}</strong><span>{label}</span></div>)}</div>{stats.played === 0 ? <div className="empty-stats"><Knight /><h2>{t.noStats}</h2><p>{t.noStatsText}</p><button className="primary-button" onClick={() => setPage('play')}>{t.start}<ArrowRight size={16} /></button></div> : <div className="progress-details"><section className="settings-card"><h2>{t.distribution}</h2><div className="distribution">{Array.from({ length: 12 }, (_, index) => index + 1).map(attempt => <div className="distribution-row" key={attempt}><span>{attempt}</span><div style={{ width: `${Math.max(8, ((stats.distribution[attempt] ?? 0) / Math.max(1, ...Object.values(stats.distribution))) * 100)}%` }}>{stats.distribution[attempt] ?? 0}</div></div>)}</div><p className="best-streak"><Flame size={16} />{t.bestStreak}: <strong>{stats.bestStreak}</strong></p></section><section className="settings-card"><h2>{t.history}</h2><div className="history-list">{history.slice(0, 12).map(item => <div className="history-item" key={item.id}><span className="history-piece">{chessPieces[item.config.mode]}</span><div><strong>{t[item.config.mode]} <small>· {item.config.length}</small></strong><span>{new Date(item.finishedAt ?? 0).toLocaleDateString(config.language === 'pt' ? 'pt-BR' : 'en-US')} · {t[item.config.difficulty]}</span></div><span className={`history-result ${item.status}`}>{item.status === 'won' ? `${item.guesses.length}/${item.maxAttempts}` : t.loss}</span></div>)}</div></section></div>}</section>}
+        </> : <section className="progress-page"><button className="text-button" onClick={() => setPage('play')}><ArrowLeft size={16} />{t.backToGame}</button><div className="eyebrow"><span />{t.stats}</div><h1>{t.progressTitle}</h1><p className="progress-description">{t.progressDesc}</p><div className="stats-grid">{[{ icon: Grid2X2, value: stats.played, label: t.played }, { icon: Trophy, value: stats.won, label: t.victories }, { icon: BarChart3, value: `${stats.winRate}%`, label: t.winRate }, { icon: Flame, value: stats.currentStreak, label: t.streak }].map(({ icon: Icon, value, label }) => <div className="stat-card" key={label}><Icon size={21} /><strong>{value}</strong><span>{label}</span></div>)}</div>{stats.played === 0 ? <div className="empty-stats"><Knight /><h2>{t.noStats}</h2><p>{t.noStatsText}</p><button className="primary-button" onClick={() => setPage('play')}>{t.start}<ArrowRight size={16} /></button></div> : <div className="progress-details"><section className="settings-card"><h2>{t.distribution}</h2><div className="distribution">{Array.from({ length: 12 }, (_, index) => index + 1).map(attempt => <div className="distribution-row" key={attempt}><span>{attempt}</span><div style={{ width: `${Math.max(8, ((stats.distribution[attempt] ?? 0) / Math.max(1, ...Object.values(stats.distribution))) * 100)}%` }}>{stats.distribution[attempt] ?? 0}</div></div>)}</div><p className="best-streak"><Flame size={16} />{t.bestStreak}: <strong>{stats.bestStreak}</strong></p></section><section className="settings-card"><h2>{t.history}</h2><div className="history-list">{history.slice(0, 12).map(item => <div className="history-item" key={item.id}><span className="history-piece">{item.game ? chessPieces[item.game.config.mode] : '♟'}</span><div><strong>{item.game ? t[item.game.config.mode] : config.language === 'pt' ? 'Partida' : 'Game'} {item.game && <small>· {item.game.config.length}</small>}</strong><span>{new Date(item.finishedAt ?? 0).toLocaleDateString(config.language === 'pt' ? 'pt-BR' : 'en-US')}{item.game && <> · {t[item.game.config.difficulty]}</>}</span></div><span className={`history-result ${item.won ? 'won' : 'lost'}`}>{item.won ? item.game ? `${item.attempts}/${item.game.maxAttempts}` : t.win : t.loss}</span></div>)}</div></section></div>}</section>}
         <footer className="main-footer"><span>xeque<span>.</span> <span className="footer-separator">/</span> {t.tagline}</span><div className="footer-downloads"><a className="android-download" href="https://github.com/DanielTR048/xeque-palavras/releases/latest/download/xeque-android.apk" title={t.androidOffline}><Download size={14} />{t.androidDownload}</a><a href="https://github.com/DanielTR048/xeque-palavras" target="_blank" rel="noreferrer">{t.sourceCode}</a></div><span>{t.local}</span></footer>
       </main>
     </div>
 
     {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null); }}><div ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex={-1}><button className="modal-close icon-button" aria-label={t.close} onClick={() => setModal(null)}><X size={20} /></button>
       {modal === 'help' && <><div className="modal-chess">♞</div><div className="eyebrow">{t.how}</div><h2 id="modal-title">{t.instructionsTitle}</h2><p>{t.instructionsText}</p><ol className="rules"><li>{t.rule1}</li><li>{t.rule2}</li><li>{t.rule3}</li></ol><div className="example-word">{(config.language === 'pt' ? 'TORRE' : 'ROOKS').split('').map((letter, index) => <span key={index} className={index === 0 ? 'correct' : index === 2 ? 'present' : 'absent'}>{letter}</span>)}</div><div className="help-legend">{(['correct', 'present', 'absent'] as const).map(state => <span key={state}><i className={state} />{statusLabels[state]}</span>)}</div><p className="modal-note">{t.accents}</p><button className="primary-button full-width" onClick={() => setModal(null)}>{t.start}<ArrowRight size={16} /></button></>}
-      {modal === 'settings' && <><Settings2 className="modal-heading-icon" size={27} /><h2 id="modal-title">{t.preferencesTitle}</h2>{(['highContrast', 'sound'] as const).map(preference => <label className="preference-row" key={preference}><span><strong>{preference === 'highContrast' ? t.contrast : t.sound}</strong><small>{preference === 'highContrast' ? t.contrastDesc : t.soundDesc}</small></span><input type="checkbox" checked={preferences[preference]} onChange={event => setPreferences(previous => ({ ...previous, [preference]: event.target.checked }))} /></label>)}<div className="preference-row"><span><strong>{t.language}</strong><small>{t.languageDesc}</small></span><select aria-label={t.language} value={config.language} onChange={event => changeConfig({ language: event.target.value as Language })}><option value="pt">Português</option><option value="en">English</option></select></div></>}
+      {modal === 'settings' && <><Settings2 className="modal-heading-icon" size={27} /><h2 id="modal-title">{t.preferencesTitle}</h2>{(['highContrast', 'sound'] as const).map(preference => <label className="preference-row" key={preference}><span><strong>{preference === 'highContrast' ? t.contrast : t.sound}</strong><small>{preference === 'highContrast' ? t.contrastDesc : t.soundDesc}</small></span><input type="checkbox" checked={preferences[preference]} onChange={event => setPreferences(previous => ({ ...previous, [preference]: event.target.checked }))} /></label>)}<div className="preference-row"><span><strong>{t.language}</strong><small>{t.languageDesc}</small></span><select aria-label={t.language} value={config.language} onChange={event => changeConfig({ language: event.target.value as Language })}><option value="pt">Português</option><option value="en">English</option></select></div><div className="profile-switch-settings"><strong>{profileName(profile)}</strong><button className="secondary-button" onClick={onSwitchProfile}><Users size={14} />{config.language === 'pt' ? 'Trocar perfil' : 'Switch profile'}</button></div><SyncPanel sync={sync} language={config.language} /></>}
       {modal === 'restart' && <><RotateCcw className="modal-heading-icon" size={28} /><h2 id="modal-title">{t.restartTitle}</h2><p>{t.restartText}</p><div className="modal-actions"><button className="secondary-button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" onClick={startNewGame}>{t.confirm}</button></div></>}
       {modal === 'sources' && <><BookOpen className="modal-heading-icon" size={28} /><h2 id="modal-title">{t.source}</h2><p>{t.sourceText}</p><div className="source-links"><a href="https://github.com/fserb/pt-br" target="_blank" rel="noreferrer">Português · fserb/pt-br <ArrowRight size={14} /></a><a href="https://github.com/en-wl/wordlist" target="_blank" rel="noreferrer">English · SCOWL <ArrowRight size={14} /></a><span className="source-count">{dictionary?.count.toLocaleString(config.language)} {t.dictionary}</span><a href="/dictionaries/LICENSE-pt.txt" target="_blank" rel="noreferrer">Licença MIT · Português</a><a href="/dictionaries/LICENSE-en.txt" target="_blank" rel="noreferrer">SCOWL license · English</a></div></>}
     </div></div>}

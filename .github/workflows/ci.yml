@@ -30,6 +30,8 @@ jobs:
         run: npm test
       - name: Build web application
         run: npm run build
+      - name: Verify cloud sync, pairing and access isolation
+        run: npm run test:cloud
       - name: Install browser and system dependencies
         run: npx playwright install --with-deps chromium
       - name: Run browser tests
