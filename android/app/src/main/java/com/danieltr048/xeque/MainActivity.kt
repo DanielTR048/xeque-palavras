@@ -244,6 +244,7 @@ class MainActivity : Activity() {
         gameCard.addView(boardScroll, LinearLayout.LayoutParams(-1, -2))
         val available = (resources.displayMetrics.widthPixels / resources.displayMetrics.density).toInt() - 62
         val boardWidth = if (current.targets.size == 1) available.coerceIn(230, 500) else if (config.length >= 7) 288 else 250
+        var activeRow: View? = null
         current.targets.forEachIndexed { boardIndex, target ->
             val board = column().apply { setPadding(dp(4), dp(5), dp(4), dp(5)); background = rounded(if (boardIndex == selectedBoard && current.targets.size > 1) 0xfff0f4e7.toInt() else Color.TRANSPARENT, 10) }
             boardViews.add(board)
@@ -276,7 +277,7 @@ class MainActivity : Activity() {
                     }
                 }
                 board.addView(cells)
-                if (isCurrent) activeTiles = tiles
+                if (isCurrent) { activeTiles = tiles; if (activeRow == null) activeRow = cells }
                 if (revealRow == rowIndex && solvedAt == rowIndex && ValueAnimator.areAnimatorsEnabled()) {
                     val currentGeneration = generation
                     handler.postDelayed({ if (generation == currentGeneration) ObjectAnimator.ofFloat(board, "translationY", 0f, -dp(8).toFloat(), 0f, -dp(3).toFloat(), 0f).apply { duration = 430; start() } }, config.length * 65L + 200)
@@ -297,7 +298,19 @@ class MainActivity : Activity() {
         content.addView(button(tr(R.string.dictionary, format.format(words.getValue("pt").size), format.format(words.getValue("en").size))) { showSources() }.apply { textSize = 10f }, LinearLayout.LayoutParams(-1, dp(44)))
         content.addView(label(tr(R.string.saved), 10f, muted).apply { gravity = Gravity.CENTER })
         if (current.status == "playing") addKeyboard(current)
-        verticalScroll.post { if (freshResult) verticalScroll.smoothScrollTo(0, content.height) else verticalScroll.scrollTo(0, oldScroll) }
+        verticalScroll.post {
+            if (freshResult) verticalScroll.smoothScrollTo(0, content.height)
+            else {
+                verticalScroll.scrollTo(0, oldScroll)
+                activeRow?.let { row ->
+                    val bounds = android.graphics.Rect()
+                    row.getDrawingRect(bounds); content.offsetDescendantRectToMyCoords(row, bounds)
+                    val bottom = verticalScroll.scrollY + verticalScroll.height
+                    if (bounds.bottom + dp(16) > bottom) verticalScroll.smoothScrollTo(0, bounds.bottom + dp(16) - verticalScroll.height)
+                    else if (bounds.top < verticalScroll.scrollY) verticalScroll.smoothScrollTo(0, bounds.top)
+                }
+            }
+        }
         boardScroll.post { boardScroll.scrollTo(boardViews.getOrNull(selectedBoard)?.left ?: 0, 0) }
     }
 
@@ -389,16 +402,22 @@ class MainActivity : Activity() {
         if (result.game.solved(selectedBoard)) selectedBoard = result.game.targets.indices.firstOrNull { !result.game.solved(it) } ?: selectedBoard
         renderGame(revealRow = current.guesses.size, freshResult = result.game.status != "playing")
     }
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (game?.status == "playing" && !loading) {
+            val keyCode = event.keyCode
+            val letter = GameEngine.normalize(event.unicodeChar.toChar().toString())
+            val isLetter = letter.length == 1 && !event.isCtrlPressed && !event.isAltPressed
+            val isGameKey = keyCode in listOf(KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)
+            // Buttons consume Enter before onKeyUp; handle both phases at the activity boundary.
+            if ((isLetter || isGameKey) && event.action == KeyEvent.ACTION_DOWN) return true
+            if (event.action != KeyEvent.ACTION_UP) return super.dispatchKeyEvent(event)
             if (keyCode == KeyEvent.KEYCODE_ENTER) { submit(); return true }
             if (keyCode == KeyEvent.KEYCODE_DEL) { erase(); return true }
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) { cursor = maxOf(0, cursor - 1); updateDraft(); return true }
             if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) { cursor = minOf(config.length - 1, cursor + 1); updateDraft(); return true }
-            val letter = GameEngine.normalize(event.unicodeChar.toChar().toString())
-            if (letter.length == 1 && !event.isCtrlPressed && !event.isAltPressed) { input(letter[0]); return true }
+            if (isLetter) { input(letter[0]); return true }
         }
-        return super.onKeyUp(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
     private fun addResult(parent: LinearLayout, current: Game, fresh: Boolean, reveal: Boolean) {
